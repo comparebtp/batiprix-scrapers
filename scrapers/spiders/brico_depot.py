@@ -16,18 +16,24 @@ class BricoDepotSpider(BaseBTPSpider):
     store_chain = 'brico_depot'
     allowed_domains = ['bricodepot.fr']
 
-    # Dépôt Nice-Lingostière (ID 1944) — pour avoir les prix locaux Côte d'Azur
-    STORE_ID = '1944'
-    STORE_PATH = 'nice-lingostiere'
+    # Store config — configurable via env vars or scrapy -a store_id=1773 -a store_path=toulon
+    STORE_ID = None
+    STORE_PATH = None
+
+    def __init__(self, store_id=None, store_path=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        import os
+        self.STORE_ID = store_id or os.environ.get('BD_STORE_ID', '1944')
+        self.STORE_PATH = store_path or os.environ.get('BD_STORE_PATH', 'nice-lingostiere')
+        # Update cookie header with selected store
+        self.custom_settings = dict(self.custom_settings)
+        headers = dict(self.custom_settings.get('DEFAULT_REQUEST_HEADERS', {}))
+        headers['Cookie'] = f'USER_LAST_VISITED_STORE_ID={self.STORE_ID}; USER_LAST_VISITED_STORE_PATH=/{self.STORE_PATH}; USER_LAST_VISITED_SITE={self.STORE_ID}'
+        self.custom_settings['DEFAULT_REQUEST_HEADERS'] = headers
 
     custom_settings = {
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 3,
-        # Do NOT set TWISTED_REACTOR or DOWNLOAD_HANDLERS here.
-        # Setting TWISTED_REACTOR to None causes the spider to hang on
-        # Scrapy 2.14+ when scrapy-playwright is installed globally.
-        # Setting DOWNLOAD_HANDLERS to {} is unnecessary — Scrapy uses
-        # built-in HTTP handlers by default when no overrides are set.
         'ROBOTSTXT_OBEY': True,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'COOKIES_ENABLED': True,
@@ -37,8 +43,6 @@ class BricoDepotSpider(BaseBTPSpider):
             'Accept-Encoding': 'gzip, deflate, br',
             'Cookie': 'USER_LAST_VISITED_STORE_ID=1944; USER_LAST_VISITED_STORE_PATH=/nice-lingostiere; USER_LAST_VISITED_SITE=1944',
         },
-        # Disable Playwright for this spider (HTTP-only) without breaking
-        # the reactor. We just don't use playwright meta in requests.
         'DOWNLOAD_TIMEOUT': 60,
         'RETRY_TIMES': 3,
         'RETRY_HTTP_CODES': [403, 429, 500, 502, 503, 504],
