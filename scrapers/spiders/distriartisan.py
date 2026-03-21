@@ -62,8 +62,6 @@ class DistriartisanSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 2.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
         'ROBOTSTXT_OBEY': False,  # We respect robots.txt manually; the WAF blocks the robots.txt fetch itself
         'USER_AGENT': (
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '

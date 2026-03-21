@@ -19,8 +19,6 @@ class MaterielElectriqueSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 0.8,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 5,
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
         'ROBOTSTXT_OBEY': True,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     }

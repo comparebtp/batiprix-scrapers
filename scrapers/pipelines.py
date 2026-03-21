@@ -104,8 +104,13 @@ class DatabasePipeline:
         self._item_count = 0
 
     def close_spider(self, spider):
-        self.session.commit()
-        self.session.close()
+        try:
+            self.session.commit()
+        except Exception as e:
+            logger.error(f"Error committing final batch: {e}")
+            self.session.rollback()
+        finally:
+            self.session.close()
 
     def _get_store_id(self, chain, store_name=None):
         """Get the store ID for a chain, preferring a specific store_name if provided."""

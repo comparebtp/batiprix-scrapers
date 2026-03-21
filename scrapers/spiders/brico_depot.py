@@ -23,14 +23,25 @@ class BricoDepotSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 3,
-        'DOWNLOAD_HANDLERS': {},  # disable Playwright
-        'TWISTED_REACTOR': None,
+        # Do NOT set TWISTED_REACTOR or DOWNLOAD_HANDLERS here.
+        # Setting TWISTED_REACTOR to None causes the spider to hang on
+        # Scrapy 2.14+ when scrapy-playwright is installed globally.
+        # Setting DOWNLOAD_HANDLERS to {} is unnecessary — Scrapy uses
+        # built-in HTTP handlers by default when no overrides are set.
         'ROBOTSTXT_OBEY': True,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'COOKIES_ENABLED': True,
         'DEFAULT_REQUEST_HEADERS': {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Cookie': 'USER_LAST_VISITED_STORE_ID=1944; USER_LAST_VISITED_STORE_PATH=/nice-lingostiere; USER_LAST_VISITED_SITE=1944',
         },
+        # Disable Playwright for this spider (HTTP-only) without breaking
+        # the reactor. We just don't use playwright meta in requests.
+        'DOWNLOAD_TIMEOUT': 60,
+        'RETRY_TIMES': 3,
+        'RETRY_HTTP_CODES': [403, 429, 500, 502, 503, 504],
     }
 
     # BTP-relevant keywords to filter products from sitemap
@@ -68,13 +79,44 @@ class BricoDepotSpider(BaseBTPSpider):
         # Fetch all 5 product sitemaps
         for i in ['', '2', '3', '4', '5']:
             url = f'https://www.bricodepot.fr/productSitemap{i}.xml'
-            yield scrapy.Request(url, callback=self.parse_sitemap)
+            yield scrapy.Request(
+                url,
+                callback=self.parse_sitemap,
+                headers={'Accept': 'application/xml, text/xml, */*'},
+                dont_filter=True,
+            )
 
     def parse_sitemap(self, response):
         """Extract product URLs from sitemap XML."""
-        # Extract all URLs from sitemap
-        urls = re.findall(r'<loc>(https://www\.bricodepot\.fr/catalogue/[^<]+)</loc>', response.text)
-        self.logger.info(f"Sitemap {response.url}: {len(urls)} URLs found")
+        body = response.text
+
+        # Validate we got actual XML, not a blocked/interstitial page
+        if not body or '<urlset' not in body:
+            self.logger.error(
+                f"Sitemap {response.url} returned non-XML content "
+                f"(status={response.status}, length={len(body)}, "
+                f"first 200 chars: {body[:200]})"
+            )
+            return
+
+        # Extract all product URLs from sitemap
+        urls = re.findall(
+            r'<loc>(https://www\.bricodepot\.fr/catalogue/[^<]+)</loc>',
+            body,
+        )
+        self.logger.info(
+            f"Sitemap {response.url}: {len(urls)} URLs found "
+            f"(response size: {len(body)} bytes)"
+        )
+
+        if len(urls) == 0:
+            # Log more details for debugging on CI
+            all_locs = re.findall(r'<loc>([^<]+)</loc>', body)
+            self.logger.warning(
+                f"No /catalogue/ URLs in sitemap. Total <loc> tags: {len(all_locs)}. "
+                f"Sample URLs: {all_locs[:3]}"
+            )
+            return
 
         filtered = 0
         for url in urls:
@@ -99,6 +141,11 @@ class BricoDepotSpider(BaseBTPSpider):
 
     def parse_product(self, response):
         """Extract product data from product page HTML."""
+        # Skip non-200 or blocked responses
+        if response.status != 200:
+            self.logger.warning(f"Non-200 status {response.status} for {response.url}")
+            return
+
         category_path = response.meta.get('category_path', [])
 
         # Try JSON-LD first

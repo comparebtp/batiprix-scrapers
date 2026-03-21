@@ -62,8 +62,6 @@ class WurthSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 2.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
         'ROBOTSTXT_OBEY': False,
     }
 

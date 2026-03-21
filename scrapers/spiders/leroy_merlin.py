@@ -45,9 +45,8 @@ class LeroyMerlinSpider(BaseBTPSpider):
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
         'ROBOTSTXT_OBEY': False,  # We use Googlebot UA
         'USER_AGENT': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-        # Disable Playwright for this spider
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
+        # No need to override DOWNLOAD_HANDLERS or TWISTED_REACTOR.
+        # Playwright only activates for requests with meta={'playwright': True}.
     }
 
     def start_requests(self):

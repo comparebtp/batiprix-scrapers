@@ -42,8 +42,6 @@ class TollensSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 2,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
     }
 
     def start_requests(self):

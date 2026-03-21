@@ -32,14 +32,19 @@ ITEM_PIPELINES = {
     "scrapers.pipelines.DatabasePipeline": 300,
 }
 
-# Playwright (for JS-heavy sites) — only loaded if scrapy-playwright is installed
+# Asyncio reactor — required by scrapy-playwright and modern Scrapy (2.14+).
+# Always set it so spiders don't need to manage reactor settings.
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+
+# Playwright (for JS-heavy sites) — only loaded if scrapy-playwright is installed.
+# HTTP-only spiders work fine with these handlers; Playwright only activates
+# for requests that include meta={'playwright': True}.
 try:
     import scrapy_playwright  # noqa: F401
     DOWNLOAD_HANDLERS = {
         "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
         "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     }
-    TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
     PLAYWRIGHT_BROWSER_TYPE = "chromium"
     PLAYWRIGHT_LAUNCH_OPTIONS = {
         "headless": True,

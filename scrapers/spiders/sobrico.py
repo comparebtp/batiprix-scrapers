@@ -16,8 +16,6 @@ class SobricoSpider(BaseBTPSpider):
     custom_settings = {
         'DOWNLOAD_DELAY': 1.0,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 4,
-        'DOWNLOAD_HANDLERS': {},
-        'TWISTED_REACTOR': None,
         'ROBOTSTXT_OBEY': True,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     }
