@@ -33,6 +33,14 @@ STORES = [
 
     # Brico io (Italie)
     {"name": "Brico io Imperia", "chain": "brico_io", "address": "Strada Provinciale 1", "city": "Imperia", "postal_code": "18100", "lat": 43.8830, "lng": 8.0260, "website": "https://www.bricoio.it/"},
+
+    # Tollens
+    {"name": "Tollens Nice", "chain": "tollens", "city": "Nice", "website": "https://www.tollens.com"},
+
+    # Online stores
+    {"name": "Sobrico Online", "chain": "sobrico", "city": "Cholet", "website": "https://www.sobrico.com"},
+    {"name": "MaterielElectrique Online", "chain": "materiel_electrique", "city": "France", "website": "https://www.materielelectrique.com"},
+    {"name": "Distriartisan Online", "chain": "distriartisan", "city": "Bordeaux", "website": "https://www.distriartisan.fr"},
 ]
 
 

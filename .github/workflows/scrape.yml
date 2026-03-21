@@ -5,196 +5,110 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch:
 
-# Common setup reused by all spider jobs
-env:
-  DATABASE_URL: ${{ secrets.DATABASE_URL }}
-
 jobs:
-  # ─── SPIDER JOBS (parallel) ────────────────────────────
   brico-depot:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape Brico Dépôt
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl brico_depot -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-brico-depot
-          path: data/btp_comparateur.db
-          retention-days: 1
 
   tollens:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape Tollens
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl tollens -s LOG_LEVEL=INFO 2>&1 | tail -20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-tollens
-          path: data/btp_comparateur.db
-          retention-days: 1
 
   sobrico:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape Sobrico
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl sobrico -s LOG_LEVEL=INFO 2>&1 | tail -20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-sobrico
-          path: data/btp_comparateur.db
-          retention-days: 1
 
   materiel-electrique:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape MaterielElectrique
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl materiel_electrique -s LOG_LEVEL=INFO 2>&1 | tail -20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-materiel-electrique
-          path: data/btp_comparateur.db
-          retention-days: 1
 
   wurth:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape Würth
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl wurth -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.5 2>&1 | tail -20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-wurth
-          path: data/btp_comparateur.db
-          retention-days: 1
 
   distriartisan:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-      - name: Scrape Distriartisan
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape
         run: python -m scrapy crawl distriartisan -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.0 2>&1 | tail -20
-      - uses: actions/upload-artifact@v4
-        with:
-          name: db-distriartisan
-          path: data/btp_comparateur.db
-          retention-days: 1
 
-  # ─── MERGE & SYNC (after all spiders finish) ───────────
-  merge-and-sync:
+  # After all spiders: run matcher + specs + update denormalized fields
+  post-process:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [brico-depot, tollens, sobrico, materiel-electrique, wurth, distriartisan]
     if: always()
     env:
-      DATABASE_URL: sqlite:///data/btp_comparateur.db
-
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: 'pip' }
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
-
-      - name: Download all DB artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Merge all DBs into one
-        run: |
-          python -c "
-          import sqlite3, os, glob
-
-          # Start with a fresh DB from the schema
-          main_db = 'data/btp_comparateur.db'
-          os.makedirs('data', exist_ok=True)
-
-          # Force SQLite for local merge (not Neon)
-          import sys
-          sys.path.insert(0, '.')
-          os.environ['DATABASE_URL'] = f'sqlite:///{main_db}'
-          from db.models import init_db, get_session, Store, Base, get_engine
-          engine = get_engine()
-          Base.metadata.create_all(engine)
-
-          # Seed stores from spider DBs first
-          session = get_session()
-          for db_file in glob.glob('artifacts/db-*/btp_comparateur.db'):
-              src = sqlite3.connect(db_file)
-              for row in src.execute('SELECT * FROM stores'):
-                  existing = session.query(Store).filter_by(id=row[0]).first()
-                  if not existing:
-                      store = Store(id=row[0], name=row[1], chain=row[2], address=row[3], city=row[4], postal_code=row[5], lat=row[6], lng=row[7], website=row[8] if len(row) > 8 else None)
-                      session.add(store)
-              src.close()
-          session.commit()
-          session.close()
-
-          main = sqlite3.connect(main_db)
-          mc = main.cursor()
-
-          # Merge each spider's DB
-          for db_file in glob.glob('artifacts/db-*/btp_comparateur.db'):
-              spider_name = os.path.basename(os.path.dirname(db_file)).replace('db-', '')
-              print(f'Merging {spider_name}...')
-
-              src = sqlite3.connect(db_file)
-              sc = src.cursor()
-
-              # Copy stores
-              for row in sc.execute('SELECT * FROM stores'):
-                  try:
-                      mc.execute('INSERT OR IGNORE INTO stores VALUES (?,?,?,?,?,?,?,?)', row)
-                  except: pass
-
-              # Copy store_listings
-              for row in sc.execute('SELECT * FROM store_listings'):
-                  try:
-                      mc.execute('INSERT OR REPLACE INTO store_listings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', row)
-                  except: pass
-
-              # Copy price_history
-              for row in sc.execute('SELECT * FROM price_history'):
-                  try:
-                      mc.execute('INSERT OR IGNORE INTO price_history VALUES (?,?,?,?)', row)
-                  except: pass
-
-              src.close()
-
-          main.commit()
-
-          # Count
-          total_listings = mc.execute('SELECT COUNT(*) FROM store_listings').fetchone()[0]
-          print(f'Merged: {total_listings} total listings')
-          main.close()
-          "
 
       - name: Run matcher
         run: python -m pipeline.matcher --fix
@@ -203,115 +117,74 @@ jobs:
       - name: Extract specs & update fields
         run: |
           python -c "
-          import sqlite3, json, sys
+          import os, sys, json
           sys.path.insert(0, '.')
-          from pipeline.spec_extractor import extract_specs
+          os.environ.setdefault('DATABASE_URL', '')
+          from db.models import get_session, Product
+          from pipeline.spec_extractor import extract_specs, specs_to_json
 
-          db = sqlite3.connect('data/btp_comparateur.db')
-          c = db.cursor()
-
-          # Specs for new products
-          products = c.execute('SELECT id, name FROM products WHERE specifications IS NULL').fetchall()
-          for pid, name in products:
-              specs = extract_specs(name)
-              if specs:
-                  c.execute('UPDATE products SET specifications=?, volume=?, color=?, weight=?, dimensions=?, pack_size=?, finish=? WHERE id=?',
-                      (json.dumps(specs, ensure_ascii=False), specs.get('volume'), specs.get('color'), specs.get('weight'),
-                       specs.get('dimensions'), specs.get('pack_size'), specs.get('finish'), pid))
-          db.commit()
-
-          # Denormalized fields
-          for row in c.execute('SELECT id FROM products').fetchall():
-              pid = row[0]
-              stats = c.execute('SELECT MIN(current_price), MAX(current_price), COUNT(*) FROM store_listings WHERE product_id=?', (pid,)).fetchone()
-              c.execute('UPDATE products SET min_price=?, max_price=?, listing_count=? WHERE id=?', (stats[0], stats[1], stats[2], pid))
-          db.commit()
-
-          # Migrate EAN from manufacturer_ref where applicable
-          c.execute('''UPDATE store_listings SET store_ean = store_manufacturer_ref, store_manufacturer_ref = NULL
-              WHERE store_manufacturer_ref IS NOT NULL AND LENGTH(store_manufacturer_ref) = 13 AND store_ean IS NULL''')
-          db.commit()
-
-          total = c.execute('SELECT COUNT(*) FROM products WHERE listing_count > 0').fetchone()[0]
-          listings = c.execute('SELECT COUNT(*) FROM store_listings').fetchone()[0]
-          print(f'Done: {total} active products, {listings} listings')
-          db.close()
-          "
-
-      - name: Sync to Neon
-        env:
-          NEON_DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          python -c "
-          import sqlite3, psycopg2, json, os
-
-          neon_url = os.environ['NEON_DATABASE_URL']
-          db = sqlite3.connect('data/btp_comparateur.db')
-          db.row_factory = sqlite3.Row
-
-          conn = psycopg2.connect(neon_url)
-          c = conn.cursor()
-
-          # Sync stores
-          for s in db.execute('SELECT * FROM stores').fetchall():
-              s = dict(s)
-              c.execute('''INSERT INTO stores (id, name, chain, address, city, postal_code, lat, lng, website)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING''',
-                  (s['id'], s['name'], s['chain'], s.get('address'), s.get('city'), s.get('postal_code'), s.get('lat'), s.get('lng'), s.get('website')))
-
-          # Sync products
-          products = [dict(r) for r in db.execute('SELECT * FROM products').fetchall()]
+          session = get_session()
+          products = session.query(Product).filter(Product.specifications.is_(None)).all()
+          print(f'Products without specs: {len(products)}')
           for p in products:
-              c.execute('''INSERT INTO products (id, name, canonical_name, slug, ean, brand, manufacturer,
-                  manufacturer_ref, category_id, unit, description, image_url, specifications,
-                  volume, color, weight, dimensions, pack_size, finish,
-                  min_price, max_price, listing_count)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                  ON CONFLICT (id) DO UPDATE SET
-                  name=EXCLUDED.name, slug=EXCLUDED.slug, ean=EXCLUDED.ean, brand=EXCLUDED.brand,
-                  min_price=EXCLUDED.min_price, max_price=EXCLUDED.max_price, listing_count=EXCLUDED.listing_count,
-                  specifications=EXCLUDED.specifications, volume=EXCLUDED.volume, color=EXCLUDED.color,
-                  weight=EXCLUDED.weight, dimensions=EXCLUDED.dimensions, pack_size=EXCLUDED.pack_size,
-                  finish=EXCLUDED.finish, description=EXCLUDED.description, image_url=EXCLUDED.image_url''',
-                  (p['id'], p['name'], p.get('canonical_name'), p['slug'], p.get('ean'),
-                   p.get('brand'), p.get('manufacturer'), p.get('manufacturer_ref'),
-                   p.get('category_id'), p.get('unit'), p.get('description'), p.get('image_url'),
-                   p.get('specifications'), p.get('volume'), p.get('color'), p.get('weight'),
-                   p.get('dimensions'), p.get('pack_size'), p.get('finish'),
-                   p.get('min_price'), p.get('max_price'), p.get('listing_count', 0)))
+              specs = extract_specs(p.name)
+              if specs:
+                  p.specifications = specs_to_json(specs)
+                  if specs.get('volume'): p.volume = specs['volume'][:20]
+                  if specs.get('color'): p.color = specs['color'][:50]
+                  if specs.get('weight'): p.weight = specs['weight'][:20]
+                  if specs.get('dimensions'): p.dimensions = specs['dimensions'][:50]
+                  if specs.get('pack_size'): p.pack_size = specs['pack_size'][:30]
+                  if specs.get('finish'): p.finish = specs['finish'][:30]
+          session.commit()
 
-          # Sync listings
-          listings = [dict(r) for r in db.execute('SELECT * FROM store_listings').fetchall()]
+          # Update denormalized fields
+          from sqlalchemy import func
+          from db.models import StoreListing
+          all_products = session.query(Product).all()
+          for p in all_products:
+              stats = session.query(
+                  func.min(StoreListing.current_price),
+                  func.max(StoreListing.current_price),
+                  func.count(StoreListing.id)
+              ).filter(StoreListing.product_id == p.id).first()
+              p.min_price = stats[0]
+              p.max_price = stats[1]
+              p.listing_count = stats[2]
+          session.commit()
+
+          # Migrate EAN from manufacturer_ref
+          listings = session.query(StoreListing).filter(
+              StoreListing.store_manufacturer_ref.isnot(None),
+              StoreListing.store_ean.is_(None),
+              func.length(StoreListing.store_manufacturer_ref) == 13
+          ).all()
           for l in listings:
-              c.execute('''INSERT INTO store_listings (id, store_id, product_id, store_product_name, store_product_url,
-                  store_sku, store_ean, store_manufacturer_ref, current_price, old_price, unit_price, unit_label,
-                  in_stock, category_path, image_url, last_scraped_at)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                  ON CONFLICT (id) DO UPDATE SET
-                  product_id=EXCLUDED.product_id, current_price=EXCLUDED.current_price,
-                  store_product_name=EXCLUDED.store_product_name, store_ean=EXCLUDED.store_ean,
-                  last_scraped_at=EXCLUDED.last_scraped_at''',
-                  (l['id'], l['store_id'], l.get('product_id'), l['store_product_name'], l.get('store_product_url'),
-                   l.get('store_sku'), l.get('store_ean'), l.get('store_manufacturer_ref'),
-                   l['current_price'], l.get('old_price'), l.get('unit_price'), l.get('unit_label'),
-                   l.get('in_stock', True), l.get('category_path'), l.get('image_url'), l.get('last_scraped_at')))
+              if l.store_manufacturer_ref.isdigit():
+                  l.store_ean = l.store_manufacturer_ref
+                  l.store_manufacturer_ref = None
+          session.commit()
 
-          conn.commit()
-          conn.close()
-          db.close()
-          print(f'Synced {len(products)} products and {len(listings)} listings to Neon')
+          total = session.query(Product).filter(Product.listing_count > 0).count()
+          total_l = session.query(StoreListing).count()
+          print(f'Done: {total} active products, {total_l} listings')
+          session.close()
           "
+        continue-on-error: true
 
       - name: Print summary
         run: |
           python -c "
-          import sqlite3
-          db = sqlite3.connect('data/btp_comparateur.db')
-          c = db.cursor()
+          import sys
+          sys.path.insert(0, '.')
+          from db.models import get_session, Product, StoreListing, Store
+          from sqlalchemy import func
+
+          session = get_session()
           print('=== SCRAPE SUMMARY ===')
-          print(f'Products: {c.execute(\"SELECT COUNT(*) FROM products\").fetchone()[0]}')
-          print(f'Listings: {c.execute(\"SELECT COUNT(*) FROM store_listings\").fetchone()[0]}')
-          for r in c.execute('SELECT s.chain, COUNT(sl.id) FROM store_listings sl JOIN stores s ON sl.store_id=s.id GROUP BY s.chain ORDER BY COUNT(sl.id) DESC'):
-              print(f'  {r[0]}: {r[1]}')
-          db.close()
+          print(f'Products: {session.query(Product).count()}')
+          print(f'Listings: {session.query(StoreListing).count()}')
+          for chain, cnt in session.query(Store.chain, func.count(StoreListing.id)).join(StoreListing).group_by(Store.chain).order_by(func.count(StoreListing.id).desc()).all():
+              print(f'  {chain}: {cnt}')
+          session.close()
           "
