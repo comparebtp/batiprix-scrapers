@@ -100,6 +100,36 @@ jobs:
       - name: Scrape
         run: python -m scrapy crawl wurth -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.5 2>&1 | tail -20
 
+  elec123:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape 123elec
+        run: python -m scrapy crawl elec123 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  maxoutil:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Maxoutil
+        run: python -m scrapy crawl maxoutil -s LOG_LEVEL=INFO 2>&1 | tail -20
+
   distriartisan:
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -119,7 +149,7 @@ jobs:
   post-process:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [brico-depot-nice, brico-depot-toulon, tollens, sobrico, materiel-electrique, wurth, distriartisan]
+    needs: [brico-depot-nice, brico-depot-toulon, tollens, sobrico, materiel-electrique, wurth, distriartisan, elec123, maxoutil]
     if: always()
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}

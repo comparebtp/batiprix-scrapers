@@ -46,6 +46,11 @@ STORES = [
     {"name": "Sobrico Online", "chain": "sobrico", "city": "Cholet", "website": "https://www.sobrico.com"},
     {"name": "MaterielElectrique Online", "chain": "materiel_electrique", "city": "France", "website": "https://www.materielelectrique.com"},
     {"name": "Distriartisan Online", "chain": "distriartisan", "city": "Bordeaux", "website": "https://www.distriartisan.fr"},
+
+    # New stores
+    {"name": "Maxoutil Online", "chain": "maxoutil", "city": "France", "website": "https://www.maxoutil.com"},
+    {"name": "Mr Bricolage Nice", "chain": "mr_bricolage", "city": "Nice", "website": "https://www.mr-bricolage.fr"},
+    {"name": "123elec Online", "chain": "elec123", "city": "France", "website": "https://www.123elec.com"},
 ]
 
 
