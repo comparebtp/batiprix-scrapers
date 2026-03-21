@@ -8,7 +8,10 @@ Strategy:
 """
 import json
 import scrapy
-from scrapy_playwright.page import PageMethod
+try:
+    from scrapy_playwright.page import PageMethod
+except ImportError:
+    PageMethod = None  # Playwright not installed
 from scrapers.spiders.base import BaseBTPSpider
 
 
