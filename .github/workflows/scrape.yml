@@ -113,6 +113,8 @@ jobs:
     timeout-minutes: 30
     needs: [brico-depot, tollens, sobrico, materiel-electrique, wurth, distriartisan]
     if: always()
+    env:
+      DATABASE_URL: sqlite:///data/btp_comparateur.db
 
     steps:
       - uses: actions/checkout@v4
@@ -134,11 +136,13 @@ jobs:
           main_db = 'data/btp_comparateur.db'
           os.makedirs('data', exist_ok=True)
 
-          # Init DB with schema + seed stores
+          # Force SQLite for local merge (not Neon)
           import sys
           sys.path.insert(0, '.')
-          from db.models import init_db, get_session, Store
-          init_db()
+          os.environ['DATABASE_URL'] = f'sqlite:///{main_db}'
+          from db.models import init_db, get_session, Store, Base, get_engine
+          engine = get_engine()
+          Base.metadata.create_all(engine)
 
           # Seed stores from spider DBs first
           session = get_session()
@@ -235,14 +239,14 @@ jobs:
           "
 
       - name: Sync to Neon
-        if: env.DATABASE_URL != ''
+        if: ${{ secrets.DATABASE_URL != '' }}
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NEON_DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python -c "
           import sqlite3, psycopg2, json, os
 
-          neon_url = os.environ['DATABASE_URL']
+          neon_url = os.environ['NEON_DATABASE_URL']
           db = sqlite3.connect('data/btp_comparateur.db')
           db.row_factory = sqlite3.Row
 
