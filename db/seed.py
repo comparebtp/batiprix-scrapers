@@ -1,5 +1,10 @@
 """Seed database with stores and categories for Côte d'Azur."""
-from .models import Store, Category, get_session, init_db
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from .models import Store, Category, get_session, init_db
+except ImportError:
+    from db.models import Store, Category, get_session, init_db
 
 
 STORES = [
