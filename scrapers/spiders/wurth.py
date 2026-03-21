@@ -1,17 +1,16 @@
 """Spider for Würth France - eshop.wurth.fr
 
-Strategy:
-1. Use the Suggest API (ViewParametricSearch-Suggest) to discover product groups
-   from BTP search terms. This returns product group IDs, names, and images.
-2. Build category URLs from those IDs and visit product group pages.
-3. On product group pages, extract the embedded JS data (familyVo/modelContainer)
-   for product names, SKUs, images, and links.
-4. Follow individual product (.sku) pages to get JSON-LD structured data with
-   gtin13 (EAN), exact SKU, and availability.
-5. Prices require login, so we extract what's publicly available.
+Strategy (hybrid search + product pages):
+1. Use the search results page for each BTP term to find products directly.
+   The search page shows product cards with names, prices (HT), article numbers,
+   images, and links to .sku product pages.
+2. Also use the Suggest API to discover product group pages, then follow
+   .sku links from those pages.
+3. On individual .sku product pages, extract JSON-LD structured data
+   (ProductGroup with sku, gtin13, brand) plus page HTML for prices.
 
-Also crawls BTP-relevant top-level categories to discover products not
-found via search terms.
+Note: Prices require login for many products ("Prix sur demande").
+The search results page sometimes shows prices ("XX € H.T.") for popular items.
 """
 import json
 import re
@@ -25,6 +24,7 @@ class WurthSpider(BaseBTPSpider):
     allowed_domains = ['eshop.wurth.fr']
 
     BASE_URL = 'https://eshop.wurth.fr'
+    SEARCH_URL = 'https://eshop.wurth.fr/Recherche/resultat-recherche.htm'
     SUGGEST_URL = (
         'https://eshop.wurth.fr/is-bin/INTERSHOP.enfinity/WFS/'
         '3107-B1-Site/fr_FR/-/EUR/ViewParametricSearch-Suggest'
@@ -59,24 +59,6 @@ class WurthSpider(BaseBTPSpider):
         'echafaudage', 'echelle', 'escabeau', 'brouette', 'serre joint',
     ]
 
-    # BTP-relevant top-level category IDs for crawling
-    CATEGORY_IDS = [
-        ('Chevillage', '310745'),
-        ('Fixation-directe', '310740'),
-        ('Installation-electrique', '310755'),
-        ('Machines', '310750'),
-        ('Materiel-de-construction', '310710'),
-        ('Metrologie', '310761'),
-        ('Outils-manuels', '310760'),
-        ('Produits-chimiques', '310730'),
-        ('Abrasifs-et-outils-coupants', '310775'),
-        ('Equipement-de-securite-et-de-protection', '310705'),
-        ('Equipement-d-atelier-et-de-chantier', '310720'),
-        ('Vis-Boulons-Rivets-Clous-et-Agrafes', '310735'),
-        ('Sanitaire-chauffage-climatisation', '310780'),
-        ('Tuyaux-raccords-et-colliers-de-serrage', '310721'),
-    ]
-
     custom_settings = {
         'DOWNLOAD_DELAY': 2.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
@@ -87,11 +69,19 @@ class WurthSpider(BaseBTPSpider):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.seen_refs = set()          # deduplicate SKUs across all sources
-        self.seen_group_ids = set()     # deduplicate product group pages
+        self.seen_skus = set()           # deduplicate by SKU/article number
+        self.seen_group_ids = set()      # deduplicate product group pages
 
     def start_requests(self):
-        # --- Phase 1: Search via Suggest API ---
+        # --- Phase 1: Search results pages (direct product extraction) ---
+        for term in self.SEARCH_TERMS:
+            yield scrapy.Request(
+                f'{self.SEARCH_URL}?SearchTerm={term}',
+                callback=self.parse_search_results,
+                meta={'search_term': term},
+            )
+
+        # --- Phase 2: Suggest API for product group discovery ---
         for term in self.SEARCH_TERMS:
             yield scrapy.Request(
                 f'{self.SUGGEST_URL}?SearchTerm={term}',
@@ -100,24 +90,144 @@ class WurthSpider(BaseBTPSpider):
                 headers={'Accept': 'application/json'},
             )
 
-        # --- Phase 2: Crawl category tree ---
-        for cat_name, cat_id in self.CATEGORY_IDS:
-            url = (
-                f'{self.BASE_URL}/Categories-produits/{cat_name}/'
-                f'{cat_id}.cyid/3107.cgid/fr/FR/EUR/'
-            )
+    # ------------------------------------------------------------------
+    # Phase 1: Search results page -> extract product cards directly
+    # ------------------------------------------------------------------
+
+    def parse_search_results(self, response):
+        """Parse search results page for product cards.
+
+        Product cards use .produit containers inside .swiper-slide elements.
+        Each card has: .titre (name), .ref (article number), price text,
+        image, and a link to the .sku product page.
+        """
+        search_term = response.meta.get('search_term', '')
+
+        # Find all product containers - try multiple selectors
+        products = response.css('.produit')
+        if not products:
+            products = response.css('.swiper-slide')
+
+        self.logger.info(
+            f"Search '{search_term}': found {len(products)} product cards"
+        )
+
+        items_from_page = 0
+        for card in products:
+            item = self._extract_from_card(card, response, search_term)
+            if item:
+                items_from_page += 1
+                yield item
+
+        # Also find all .sku links on the page and follow them for
+        # more detailed data (JSON-LD with EAN, etc.)
+        sku_links = response.css('a[href*=".sku/"]::attr(href)').getall()
+        sku_links = list(set(sku_links))
+
+        for href in sku_links:
+            # Extract SKU from URL to check dedup
+            sku_match = re.search(r'/([^/]+)\.sku/', href)
+            if not sku_match:
+                continue
+            sku = sku_match.group(1).replace('%20', ' ')
+            normalized = sku.replace(' ', '')
+
+            full_url = response.urljoin(href)
             yield scrapy.Request(
-                url,
-                callback=self.parse_category,
-                meta={'category_path': [cat_name.replace('-', ' ')], 'depth': 0},
+                full_url,
+                callback=self.parse_product_page,
+                meta={
+                    'search_term': search_term,
+                    'sku_hint': sku,
+                },
+                errback=self.handle_error,
+                dont_filter=False,
             )
 
+        self.logger.info(
+            f"Search '{search_term}': {items_from_page} items extracted, "
+            f"{len(sku_links)} .sku links to follow"
+        )
+
+    def _extract_from_card(self, card, response, search_term):
+        """Extract product data from a search result card element."""
+        # Product name from .titre or a[title]
+        name = card.css('.titre::text').get('').strip()
+        if not name:
+            name = card.css('.titre a::text').get('').strip()
+        if not name:
+            name = card.css('a[title]::attr(title)').get('').strip()
+        if not name:
+            # Try any link text
+            name = card.css('a::text').get('').strip()
+        if not name:
+            return None
+
+        # Article number from .ref
+        ref_text = card.css('.ref::text').get('')
+        if not ref_text:
+            ref_text = card.css('.ref *::text').get('')
+        ref = ''
+        if ref_text:
+            # Extract digits from "Art. N° 071566 295" or "096513 023"
+            ref_match = re.search(r'(\d[\d\s]+\d)', ref_text)
+            if ref_match:
+                ref = ref_match.group(1).strip()
+
+        # Normalize SKU for dedup
+        normalized = ref.replace(' ', '') if ref else ''
+        if not normalized:
+            # Try extracting from product URL
+            href = card.css('a[href*=".sku/"]::attr(href)').get('')
+            if href:
+                sku_match = re.search(r'/([^/]+)\.sku/', href)
+                if sku_match:
+                    ref = sku_match.group(1).replace('%20', ' ')
+                    normalized = ref.replace(' ', '')
+
+        if not normalized:
+            return None
+
+        if normalized in self.seen_skus:
+            return None
+        self.seen_skus.add(normalized)
+
+        # Product URL
+        product_url = card.css('a[href*=".sku/"]::attr(href)').get('')
+        if not product_url:
+            product_url = card.css('a::attr(href)').get('')
+        if product_url:
+            product_url = response.urljoin(product_url)
+
+        # Price - look for HT price pattern
+        card_text = ' '.join(card.css('::text').getall())
+        price = self._parse_ht_price(card_text)
+
+        # Image
+        image = card.css('img::attr(src)').get('')
+        if not image:
+            image = card.css('img::attr(data-src)').get('')
+        if image:
+            image = response.urljoin(image)
+
+        return self.make_item(
+            product_name=name,
+            product_url=product_url or response.url,
+            sku=ref,
+            manufacturer_ref=ref,
+            manufacturer='Würth',
+            price=price,
+            unit_label='€ HT' if price else None,
+            image_url=image or '',
+            category_path=[search_term.title()],
+        )
+
     # ------------------------------------------------------------------
-    # Phase 1: Suggest API -> product group pages
+    # Phase 2: Suggest API -> product group pages -> .sku pages
     # ------------------------------------------------------------------
 
     def parse_suggest(self, response):
-        """Parse the JSON suggest API response."""
+        """Parse the JSON suggest API response to discover product groups."""
         search_term = response.meta.get('search_term', '')
         try:
             data = json.loads(response.text)
@@ -146,18 +256,22 @@ class WurthSpider(BaseBTPSpider):
                 continue
             self.seen_group_ids.add(group_id)
 
-            # Build category-style URL to the product group
+            # Build category-style URL to the product group page
             slug = re.sub(r'[^a-zA-Z0-9]+', '-', label).strip('-')
             group_url = (
                 f'{self.BASE_URL}/Categories-produits/{slug}/'
                 f'{group_id}.cyid/3107.cgid/fr/FR/EUR/'
             )
 
+            # Resolve image URL
+            if image and not image.startswith('http'):
+                image = response.urljoin(image)
+
             yield scrapy.Request(
                 group_url,
                 callback=self.parse_product_group,
                 meta={
-                    'category_path': [search_term.title()],
+                    'search_term': search_term,
                     'group_name': label,
                     'group_image': image,
                     'group_id': group_id,
@@ -165,140 +279,87 @@ class WurthSpider(BaseBTPSpider):
                 errback=self.handle_error,
             )
 
-    # ------------------------------------------------------------------
-    # Phase 2: Category tree crawling
-    # ------------------------------------------------------------------
-
-    def parse_category(self, response):
-        """Parse a category page: either subcategories or product groups."""
-        category_path = response.meta.get('category_path', [])
-        depth = response.meta.get('depth', 0)
-
-        # Look for subcategory links (pattern: /Categories-produits/Name/ID.cyid/...)
-        sub_links = response.css(
-            'a[href*=".cyid/3107.cgid/"]::attr(href)'
-        ).getall()
-
-        # Deduplicate and filter to child categories only
-        seen_urls = set()
-        for href in sub_links:
-            full_url = response.urljoin(href)
-            if full_url in seen_urls or full_url == response.url:
-                continue
-            seen_urls.add(full_url)
-
-            # Extract category name from URL
-            name_match = re.search(r'/Categories-produits/([^/]+)/', full_url)
-            cat_name = name_match.group(1).replace('-', ' ') if name_match else ''
-
-            # Extract the category ID
-            id_match = re.search(r'/(\d+)\.cyid/', full_url)
-            if not id_match:
-                continue
-            cat_id = id_match.group(1)
-
-            # If ID is long enough (>= 10 digits), it's likely a product group page
-            if len(cat_id) >= 10:
-                if cat_id not in self.seen_group_ids:
-                    self.seen_group_ids.add(cat_id)
-                    yield scrapy.Request(
-                        full_url,
-                        callback=self.parse_product_group,
-                        meta={
-                            'category_path': category_path + [cat_name],
-                            'group_id': cat_id,
-                        },
-                        errback=self.handle_error,
-                    )
-            elif depth < 4:
-                # Subcategory - go deeper
-                yield scrapy.Request(
-                    full_url,
-                    callback=self.parse_category,
-                    meta={
-                        'category_path': category_path + [cat_name],
-                        'depth': depth + 1,
-                    },
-                )
-
-    # ------------------------------------------------------------------
-    # Product group page -> individual product detail pages
-    # ------------------------------------------------------------------
-
     def parse_product_group(self, response):
-        """Parse a product group page. Extract embedded JS data and follow
-        to individual product .sku pages for full details."""
-        category_path = response.meta.get('category_path', [])
+        """Parse a product group page. Extract .sku links and follow them."""
+        search_term = response.meta.get('search_term', '')
         group_name = response.meta.get('group_name', '')
+        group_image = response.meta.get('group_image', '')
 
-        # Try to extract the embedded familyVo/modelContainer JS data
-        # which contains product SKUs and URLs
+        # Collect all .sku links from the page
+        sku_links = set()
+
+        # From HTML links
+        for href in response.css('a[href*=".sku/"]::attr(href)').getall():
+            sku_links.add(response.urljoin(href))
+
+        # From embedded JavaScript (itemUrl, product URLs)
         body_text = response.text
+        for match in re.findall(r'"(?:itemUrl|url)"\s*:\s*"([^"]*\.sku/[^"]*)"', body_text):
+            sku_links.add(response.urljoin(match))
 
-        # Look for SKU links: href containing ".sku/fr/FR/EUR/"
-        sku_links = response.css('a[href*=".sku/fr/FR/EUR/"]::attr(href)').getall()
+        # From JSON-LD hasVariant URLs
+        for script_text in response.css('script[type="application/ld+json"]::text').getall():
+            try:
+                ld_data = json.loads(script_text)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if ld_data.get('@type') == 'ProductGroup':
+                for variant in ld_data.get('hasVariant', []):
+                    url = variant.get('url', '')
+                    if '.sku/' in url:
+                        sku_links.add(url)
 
-        # Also extract SKU links from embedded JS
-        js_sku_matches = re.findall(
-            r'"itemUrl"\s*:\s*"([^"]*\.sku/fr/FR/EUR/[^"]*)"', body_text
+        # From skusOfProductsToDisplayWithoutFilters JS array
+        sku_ids = re.findall(
+            r'"skusOfProductsToDisplayWithoutFilters"\s*:\s*\[([^\]]+)\]',
+            body_text
         )
-        sku_links.extend(js_sku_matches)
-
-        # Also look for SKU patterns in quickBuyInfo
-        js_sku_ids = re.findall(r'"productSku"\s*:\s*"([^"]+)"', body_text)
-
-        # Build .sku URLs from SKU IDs if we have them but no links
-        if js_sku_ids and not sku_links:
-            for sku_id in js_sku_ids:
+        for match in sku_ids:
+            for sku_id in re.findall(r'"([^"]+)"', match):
                 sku_url = f'{self.BASE_URL}/{sku_id}.sku/fr/FR/EUR/'
-                sku_links.append(sku_url)
-
-        # Deduplicate
-        seen_skus = set()
-        unique_links = []
-        for link in sku_links:
-            # Extract SKU from URL
-            sku_match = re.search(r'/([^/]+)\.sku/', link)
-            if sku_match:
-                sku = sku_match.group(1)
-                if sku not in seen_skus:
-                    seen_skus.add(sku)
-                    unique_links.append(link)
+                sku_links.add(sku_url)
 
         self.logger.info(
-            f"Product group '{group_name or response.url}': "
-            f"found {len(unique_links)} SKU links"
+            f"Product group '{group_name}': {len(sku_links)} .sku links found"
         )
 
-        for link in unique_links:
-            full_url = response.urljoin(link)
+        for link in sku_links:
             yield scrapy.Request(
-                full_url,
-                callback=self.parse_product_detail,
-                meta={'category_path': category_path},
+                link,
+                callback=self.parse_product_page,
+                meta={
+                    'search_term': search_term,
+                    'group_name': group_name,
+                    'group_image': group_image,
+                },
                 errback=self.handle_error,
             )
 
-        # If no SKU links found, try to extract product info directly
-        # from JSON-LD on this page (it might be a single-product group)
-        if not unique_links:
-            yield from self._extract_from_jsonld(response, category_path)
+        # If no .sku links found, try to extract directly from JSON-LD
+        if not sku_links:
+            yield from self._extract_from_group_jsonld(
+                response, search_term, group_name, group_image
+            )
 
     # ------------------------------------------------------------------
     # Product detail page (.sku URL) -> final item extraction
     # ------------------------------------------------------------------
 
-    def parse_product_detail(self, response):
-        """Parse a product detail page and extract item data from JSON-LD."""
-        category_path = response.meta.get('category_path', [])
-        yield from self._extract_from_jsonld(response, category_path)
+    def parse_product_page(self, response):
+        """Parse an individual .sku product page.
 
-    def _extract_from_jsonld(self, response, category_path):
-        """Extract product data from JSON-LD structured data on the page."""
-        # Find JSON-LD script blocks
-        ld_scripts = response.css('script[type="application/ld+json"]::text').getall()
+        Extracts data from:
+        1. JSON-LD (ProductGroup with sku, gtin13, brand at top level)
+        2. Page HTML (Art. N°, prices, images)
+        3. Embedded JS (modelDetailConfig, dataLayer)
+        """
+        search_term = response.meta.get('search_term', '')
+        group_name = response.meta.get('group_name', '')
+        group_image = response.meta.get('group_image', '')
 
-        for script_text in ld_scripts:
+        # --- Try JSON-LD first ---
+        extracted = False
+        for script_text in response.css('script[type="application/ld+json"]::text').getall():
             try:
                 ld_data = json.loads(script_text)
             except (json.JSONDecodeError, ValueError):
@@ -307,146 +368,248 @@ class WurthSpider(BaseBTPSpider):
             ld_type = ld_data.get('@type', '')
 
             if ld_type == 'ProductGroup':
-                # Product group with variants
-                group_name = ld_data.get('name', '')
-                group_desc = ld_data.get('description', '')
+                # On .sku pages, the ProductGroup often has sku and gtin13
+                # at the top level (not inside hasVariant)
+                sku = ld_data.get('sku', '')
+                name = ld_data.get('name', '')
+                ean = ld_data.get('gtin13', '')
+                description = ld_data.get('description', '')
+                brand = ''
+                brand_obj = ld_data.get('brand', {})
+                if isinstance(brand_obj, dict):
+                    brand = brand_obj.get('name', '')
+
+                # Also check hasVariant for additional data
                 variants = ld_data.get('hasVariant', [])
 
-                if not variants:
-                    # Single product group without explicit variants
-                    sku = ld_data.get('sku', '')
-                    ean = ld_data.get('gtin13', '')
-                    if sku and sku not in self.seen_refs:
-                        self.seen_refs.add(sku)
-                        yield self._build_item(
-                            name=group_name,
+                # Image from JSON-LD or page (needed for both main product and variants)
+                image = self._get_image(ld_data)
+                if not image:
+                    image = group_image or ''
+                if not image:
+                    image = response.css(
+                        'img[src*="media.witglobal.net"]::attr(src)'
+                    ).get('')
+
+                if sku:
+                    normalized = sku.replace(' ', '')
+                    if normalized not in self.seen_skus:
+                        self.seen_skus.add(normalized)
+
+                        # Try to get price from page
+                        price = self._extract_ht_price(response)
+
+                        yield self.make_item(
+                            product_name=name,
+                            product_url=response.url,
                             sku=sku,
-                            ean=ean,
-                            url=ld_data.get('url', response.url),
-                            image=self._get_image(ld_data),
-                            description=group_desc,
-                            category_path=category_path,
-                            response=response,
+                            ean=ean or None,
+                            manufacturer_ref=sku,
+                            manufacturer=brand or 'Würth',
+                            price=price,
+                            unit_label='€ HT' if price else None,
+                            image_url=image or '',
+                            category_path=[search_term.title()] if search_term else [],
+                            description=description or None,
                         )
+                        extracted = True
 
+                # Process variants that have their own SKU
                 for variant in variants:
-                    sku = variant.get('sku', '')
-                    if not sku or sku in self.seen_refs:
+                    v_sku = variant.get('sku', '')
+                    if not v_sku:
+                        # Try to extract SKU from variant URL
+                        v_url = variant.get('url', '')
+                        if v_url:
+                            m = re.search(r'/([^/]+)\.sku/', v_url)
+                            if m:
+                                v_sku = m.group(1)
+                    if not v_sku:
                         continue
-                    self.seen_refs.add(sku)
 
-                    ean = variant.get('gtin13', '')
-                    name = variant.get('name', group_name)
-                    url = variant.get('@id', '') or self._get_offer_url(variant)
-                    image = self._get_image(variant) or self._get_image(ld_data)
-                    in_stock = self._parse_availability(variant)
+                    v_normalized = v_sku.replace(' ', '').replace('%20', '')
+                    if v_normalized in self.seen_skus:
+                        continue
+                    self.seen_skus.add(v_normalized)
 
-                    # Try to extract price from offers
-                    price = self._extract_price_from_offers(variant)
+                    v_name = variant.get('name', name)
+                    v_ean = variant.get('gtin13', '')
+                    v_url = variant.get('url', response.url)
+                    v_image = self._get_image(variant) or image
 
-                    yield self._build_item(
-                        name=name,
-                        sku=sku,
-                        ean=ean,
-                        url=url or response.url,
-                        image=image,
-                        price=price,
-                        in_stock=in_stock,
-                        description=group_desc,
-                        category_path=category_path,
-                        response=response,
-                    )
+                    # If variant has its own URL different from current page,
+                    # follow it to get full details
+                    if v_url and v_url != response.url and '.sku/' in v_url:
+                        yield scrapy.Request(
+                            v_url,
+                            callback=self.parse_product_page,
+                            meta={
+                                'search_term': search_term,
+                                'group_name': group_name,
+                                'group_image': group_image,
+                            },
+                            errback=self.handle_error,
+                        )
+                    else:
+                        yield self.make_item(
+                            product_name=v_name,
+                            product_url=v_url or response.url,
+                            sku=v_sku,
+                            ean=v_ean or None,
+                            manufacturer_ref=v_sku,
+                            manufacturer=brand or 'Würth',
+                            image_url=v_image or '',
+                            category_path=[search_term.title()] if search_term else [],
+                            description=description or None,
+                        )
+                        extracted = True
 
             elif ld_type == 'Product':
                 sku = ld_data.get('sku', '')
-                if not sku or sku in self.seen_refs:
+                if not sku:
                     continue
-                self.seen_refs.add(sku)
+                normalized = sku.replace(' ', '')
+                if normalized in self.seen_skus:
+                    continue
+                self.seen_skus.add(normalized)
 
-                ean = ld_data.get('gtin13', '')
                 name = ld_data.get('name', '')
+                ean = ld_data.get('gtin13', '')
                 image = self._get_image(ld_data)
-                in_stock = self._parse_availability(ld_data)
                 price = self._extract_price_from_offers(ld_data)
+                if not price:
+                    price = self._extract_ht_price(response)
 
-                yield self._build_item(
-                    name=name,
+                yield self.make_item(
+                    product_name=name,
+                    product_url=ld_data.get('url', response.url),
                     sku=sku,
-                    ean=ean,
-                    url=ld_data.get('url', response.url),
-                    image=image,
+                    ean=ean or None,
+                    manufacturer_ref=sku,
+                    manufacturer='Würth',
                     price=price,
-                    in_stock=in_stock,
-                    description=ld_data.get('description', ''),
-                    category_path=category_path,
-                    response=response,
+                    unit_label='€ HT' if price else None,
+                    image_url=image or '',
+                    category_path=[search_term.title()] if search_term else [],
+                    description=ld_data.get('description', '') or None,
                 )
+                extracted = True
 
-        # Fallback: try to extract price from page text if JSON-LD had none
-        # Look for the specific HT price pattern on the page
-        if not ld_scripts:
-            yield from self._fallback_extract(response, category_path)
+        # --- Fallback: extract from page HTML if no JSON-LD match ---
+        if not extracted:
+            yield from self._fallback_html_extract(response, search_term, group_image)
 
-    def _fallback_extract(self, response, category_path):
-        """Fallback extraction from page HTML when no JSON-LD is available."""
-        # Try to get product name from h1
+    # ------------------------------------------------------------------
+    # Fallback extractors
+    # ------------------------------------------------------------------
+
+    def _extract_from_group_jsonld(self, response, search_term, group_name, group_image):
+        """Extract from JSON-LD on a product group page that has no .sku links."""
+        for script_text in response.css('script[type="application/ld+json"]::text').getall():
+            try:
+                ld_data = json.loads(script_text)
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            if ld_data.get('@type') != 'ProductGroup':
+                continue
+
+            sku = ld_data.get('sku', '')
+            name = ld_data.get('name', group_name)
+            ean = ld_data.get('gtin13', '')
+
+            if sku:
+                normalized = sku.replace(' ', '')
+                if normalized not in self.seen_skus:
+                    self.seen_skus.add(normalized)
+                    yield self.make_item(
+                        product_name=name,
+                        product_url=response.url,
+                        sku=sku,
+                        ean=ean or None,
+                        manufacturer_ref=sku,
+                        manufacturer='Würth',
+                        image_url=group_image or self._get_image(ld_data) or '',
+                        category_path=[search_term.title()] if search_term else [],
+                        description=ld_data.get('description', '') or None,
+                    )
+
+    def _fallback_html_extract(self, response, search_term, group_image=''):
+        """Fallback: extract product data from page HTML when JSON-LD is missing."""
+        # Product name from h1
         title = response.css('h1::text').get('').strip()
         if not title:
-            title = response.css('h1 *::text').get('').strip()
+            title = ' '.join(response.css('h1 *::text').getall()).strip()
         if not title:
             return
 
-        # Try to get article number
-        ref_text = response.css('*::text').re_first(r'Art\.\s*N[°o]\s*([\d\s]+)')
-        ref = ref_text.strip().replace(' ', '') if ref_text else ''
+        # Article number from page text
+        all_text = ' '.join(response.css('::text').getall())
+        ref_match = re.search(r'Art\.\s*N[°o]\s*([\d\s]+\d)', all_text)
+        ref = ref_match.group(1).strip() if ref_match else ''
 
-        if not ref or ref in self.seen_refs:
+        if not ref:
+            # Try extracting from URL
+            url_match = re.search(r'/([^/]+)\.sku/', response.url)
+            if url_match:
+                ref = url_match.group(1).replace('%20', ' ')
+
+        if not ref:
             return
-        self.seen_refs.add(ref)
 
-        # Try price - look specifically for HT price patterns
+        normalized = ref.replace(' ', '')
+        if normalized in self.seen_skus:
+            return
+        self.seen_skus.add(normalized)
+
+        # Price
         price = self._extract_ht_price(response)
 
         # Image
-        img = response.css(
+        image = response.css(
             'img[src*="media.witglobal.net"]::attr(src)'
-        ).get('')
+        ).get(group_image or '')
 
         # EAN from page text
-        ean = response.css('*::text').re_first(r'EAN\s*:?\s*(\d{13})') or ''
+        ean_match = re.search(r'(?:EAN|GTIN)\s*:?\s*(\d{13})', all_text)
+        ean = ean_match.group(1) if ean_match else ''
 
-        yield self._build_item(
-            name=title,
+        yield self.make_item(
+            product_name=title,
+            product_url=response.url,
             sku=ref,
-            ean=ean,
-            url=response.url,
-            image=img,
+            ean=ean or None,
+            manufacturer_ref=ref,
+            manufacturer='Würth',
             price=price,
-            category_path=category_path,
-            response=response,
+            unit_label='€ HT' if price else None,
+            image_url=image or '',
+            category_path=[search_term.title()] if search_term else [],
         )
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_item(self, name, sku, ean, url, image, category_path,
-                    response, price=None, in_stock=None, description=''):
-        """Build a BTPProductItem via make_item."""
-        return self.make_item(
-            product_name=name,
-            product_url=url,
-            sku=sku,
-            ean=ean or None,
-            manufacturer_ref=sku,
-            manufacturer='Würth',
-            price=price,
-            unit_label='€ HT' if price else None,
-            image_url=image or '',
-            category_path=category_path,
-            in_stock=in_stock,
-            description=description or None,
+    @staticmethod
+    def _parse_ht_price(text):
+        """Parse HT price from a text string.
+
+        Looks for patterns like '89 € H.T.' or '12,50 € H.T. l'unité'
+        or 'à partir de 7 € H.T.'
+        """
+        # Pattern: number followed by € H.T.
+        match = re.search(
+            r'(\d+(?:[.,]\d+)?)\s*€\s*H\.?T\.?', text
         )
+        if match:
+            return float(match.group(1).replace(',', '.'))
+        return None
+
+    def _extract_ht_price(self, response):
+        """Extract HT price from the full page text."""
+        all_text = ' '.join(response.css('::text').getall())
+        return self._parse_ht_price(all_text)
 
     @staticmethod
     def _get_image(ld_obj):
@@ -455,27 +618,6 @@ class WurthSpider(BaseBTPSpider):
         if isinstance(img, list):
             return img[0] if img else ''
         return img or ''
-
-    @staticmethod
-    def _get_offer_url(ld_obj):
-        """Extract URL from offers in JSON-LD."""
-        offers = ld_obj.get('offers', {})
-        if isinstance(offers, list):
-            return offers[0].get('url', '') if offers else ''
-        return offers.get('url', '')
-
-    @staticmethod
-    def _parse_availability(ld_obj):
-        """Parse schema.org availability to boolean."""
-        offers = ld_obj.get('offers', {})
-        if isinstance(offers, list):
-            offers = offers[0] if offers else {}
-        avail = offers.get('availability', '')
-        if 'InStock' in avail:
-            return True
-        if 'OutOfStock' in avail:
-            return False
-        return None
 
     @staticmethod
     def _extract_price_from_offers(ld_obj):
@@ -489,30 +631,6 @@ class WurthSpider(BaseBTPSpider):
                 return round(float(price), 2)
             except (ValueError, TypeError):
                 pass
-        return None
-
-    def _extract_ht_price(self, response):
-        """Extract HT (hors taxes) price from page text.
-
-        Looks specifically for patterns like '12,50 € H.T.' or '12.50 EUR HT'
-        to avoid grabbing TTC prices or unrelated numbers.
-        """
-        all_text = ' '.join(response.css('::text').getall())
-
-        # Pattern 1: "XX,XX € H.T." or "XX,XX€ HT"
-        ht_match = re.search(
-            r'(\d+(?:[.,]\d+)?)\s*€\s*H\.?T\.?', all_text
-        )
-        if ht_match:
-            return float(ht_match.group(1).replace(',', '.'))
-
-        # Pattern 2: "XX,XX EUR HT"
-        ht_match = re.search(
-            r'(\d+(?:[.,]\d+)?)\s*EUR\s*H\.?T\.?', all_text
-        )
-        if ht_match:
-            return float(ht_match.group(1).replace(',', '.'))
-
         return None
 
     def handle_error(self, failure):

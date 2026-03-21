@@ -35,6 +35,14 @@ SPIDERS = [
         "name": "materiel_electrique",
         "settings": {},
     },
+    {
+        "name": "wurth",
+        "settings": {"DOWNLOAD_DELAY": "2.5"},
+    },
+    {
+        "name": "distriartisan",
+        "settings": {"DOWNLOAD_DELAY": "2.0"},
+    },
 ]
 
 # ─── Logging setup ───────────────────────────────────────

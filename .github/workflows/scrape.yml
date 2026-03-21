@@ -47,6 +47,16 @@ jobs:
           python -m scrapy crawl materiel_electrique -s LOG_LEVEL=INFO 2>&1 | tail -20
         continue-on-error: true
 
+      - name: Run Würth spider
+        run: |
+          python -m scrapy crawl wurth -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.5 2>&1 | tail -20
+        continue-on-error: true
+
+      - name: Run Distriartisan spider
+        run: |
+          python -m scrapy crawl distriartisan -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.0 2>&1 | tail -20
+        continue-on-error: true
+
       - name: Run matcher
         run: |
           python -m pipeline.matcher --fix
