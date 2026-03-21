@@ -32,16 +32,20 @@ ITEM_PIPELINES = {
     "scrapers.pipelines.DatabasePipeline": 300,
 }
 
-# Playwright (for JS-heavy sites)
-DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-}
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
-PLAYWRIGHT_BROWSER_TYPE = "chromium"
-PLAYWRIGHT_LAUNCH_OPTIONS = {
-    "headless": True,
-}
+# Playwright (for JS-heavy sites) — only loaded if scrapy-playwright is installed
+try:
+    import scrapy_playwright  # noqa: F401
+    DOWNLOAD_HANDLERS = {
+        "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+        "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    }
+    TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+    PLAYWRIGHT_BROWSER_TYPE = "chromium"
+    PLAYWRIGHT_LAUNCH_OPTIONS = {
+        "headless": True,
+    }
+except ImportError:
+    pass  # HTTP-only spiders don't need Playwright
 
 # Feeds (JSON backup)
 FEEDS = {

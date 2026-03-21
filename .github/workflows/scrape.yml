@@ -134,11 +134,24 @@ jobs:
           main_db = 'data/btp_comparateur.db'
           os.makedirs('data', exist_ok=True)
 
-          # Init DB with schema
+          # Init DB with schema + seed stores
           import sys
           sys.path.insert(0, '.')
-          from db.models import init_db
+          from db.models import init_db, get_session, Store
           init_db()
+
+          # Seed stores from spider DBs first
+          session = get_session()
+          for db_file in glob.glob('artifacts/db-*/btp_comparateur.db'):
+              src = sqlite3.connect(db_file)
+              for row in src.execute('SELECT * FROM stores'):
+                  existing = session.query(Store).filter_by(id=row[0]).first()
+                  if not existing:
+                      store = Store(id=row[0], name=row[1], chain=row[2], address=row[3], city=row[4], postal_code=row[5], lat=row[6], lng=row[7], website=row[8] if len(row) > 8 else None)
+                      session.add(store)
+              src.close()
+          session.commit()
+          session.close()
 
           main = sqlite3.connect(main_db)
           mc = main.cursor()
