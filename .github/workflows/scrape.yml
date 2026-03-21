@@ -239,7 +239,6 @@ jobs:
           "
 
       - name: Sync to Neon
-        if: ${{ secrets.DATABASE_URL != '' }}
         env:
           NEON_DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
