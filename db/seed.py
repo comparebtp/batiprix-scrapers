@@ -51,6 +51,9 @@ STORES = [
     {"name": "Maxoutil Online", "chain": "maxoutil", "city": "France", "website": "https://www.maxoutil.com"},
     {"name": "Mr Bricolage Nice", "chain": "mr_bricolage", "city": "Nice", "website": "https://www.mr-bricolage.fr"},
     {"name": "123elec Online", "chain": "elec123", "city": "France", "website": "https://www.123elec.com"},
+
+    # Chausson Matériaux
+    {"name": "Chausson Matériaux Nice", "chain": "chausson", "city": "Nice", "website": "https://www.chausson.fr"},
 ]
 
 
