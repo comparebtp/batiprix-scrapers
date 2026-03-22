@@ -57,6 +57,8 @@ STORES = [
 
     # Legallais
     {"name": "Legallais Online", "chain": "legallais", "city": "Caen", "website": "https://www.legallais.com"},
+    # Cedeo
+    {"name": "Cedeo Online", "chain": "cedeo", "city": "Paris", "website": "https://www.cedeo.fr"},
 ]
 
 
