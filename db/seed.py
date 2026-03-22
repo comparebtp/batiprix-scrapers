@@ -65,6 +65,15 @@ STORES = [
     {"name": "Bricozor Online", "chain": "bricozor", "city": "Paris", "website": "https://www.bricozor.com"},
     # Dispano
     {"name": "Dispano Online", "chain": "dispano", "city": "Paris", "website": "https://www.dispano.fr"},
+
+    # Racetools - Outillage pro (Makita, Bosch, DeWalt, Milwaukee, Facom)
+    {"name": "Racetools Online", "chain": "racetools", "city": "France", "website": "https://racetools.fr"},
+    # BatirMoinsCher - Matériel électrique pas cher
+    {"name": "BatirMoinsCher Online", "chain": "batirmoinscher", "city": "France", "website": "https://www.batirmoinscher.com"},
+    # MaPeinturePRO - Peinture professionnelle
+    {"name": "MaPeinturePRO Online", "chain": "mapeinturepro", "city": "France", "website": "https://mapeinturepro.com"},
+    # Au Comptoir de la Quincaillerie - Quincaillerie pro (serrurerie, ferronnerie)
+    {"name": "Au Comptoir Quincaillerie Online", "chain": "aucomptoirquincaillerie", "city": "France", "website": "https://www.aucomptoirdelaquincaillerie.fr"},
 ]
 
 

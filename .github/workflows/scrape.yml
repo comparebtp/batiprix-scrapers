@@ -464,11 +464,131 @@ jobs:
       - name: Scrape
         run: python -m scrapy crawl distriartisan -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.0 2>&1 | tail -20
 
+  racetools-0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Racetools shard 0/2
+        run: python -m scrapy crawl racetools -a shard=0 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  racetools-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Racetools shard 1/2
+        run: python -m scrapy crawl racetools -a shard=1 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  batirmoinscher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape BatirMoinsCher
+        run: python -m scrapy crawl batirmoinscher -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  mapeinturepro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape MaPeinturePRO
+        run: python -m scrapy crawl mapeinturepro -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  aucomptoirquincaillerie-0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Au Comptoir Quincaillerie shard 0/4
+        run: python -m scrapy crawl aucomptoirquincaillerie -a shard=0 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  aucomptoirquincaillerie-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Au Comptoir Quincaillerie shard 1/4
+        run: python -m scrapy crawl aucomptoirquincaillerie -a shard=1 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  aucomptoirquincaillerie-2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Au Comptoir Quincaillerie shard 2/4
+        run: python -m scrapy crawl aucomptoirquincaillerie -a shard=2 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  aucomptoirquincaillerie-3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Au Comptoir Quincaillerie shard 3/4
+        run: python -m scrapy crawl aucomptoirquincaillerie -a shard=3 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
   # After all spiders: run matcher + specs + update denormalized fields
   post-process:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [brico-depot-nice-0, brico-depot-nice-1, brico-depot-toulon-0, brico-depot-toulon-1, tollens, sobrico-0, sobrico-1, matelec-0, matelec-1, matelec-2, matelec-3, wurth, distriartisan, elec123-0, elec123-1, maxoutil, chausson-0, chausson-1, legallais-0, legallais-1, legallais-2, legallais-3, cedeo-0, cedeo-1, cedeo-2, cedeo-3, pointp-0, pointp-1, bricozor, dispano]
+    needs: [brico-depot-nice-0, brico-depot-nice-1, brico-depot-toulon-0, brico-depot-toulon-1, tollens, sobrico-0, sobrico-1, matelec-0, matelec-1, matelec-2, matelec-3, wurth, distriartisan, elec123-0, elec123-1, maxoutil, chausson-0, chausson-1, legallais-0, legallais-1, legallais-2, legallais-3, cedeo-0, cedeo-1, cedeo-2, cedeo-3, pointp-0, pointp-1, bricozor, dispano, racetools-0, racetools-1, batirmoinscher, mapeinturepro, aucomptoirquincaillerie-0, aucomptoirquincaillerie-1, aucomptoirquincaillerie-2, aucomptoirquincaillerie-3]
     if: always()
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
