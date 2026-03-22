@@ -63,6 +63,8 @@ STORES = [
     {"name": "Point P Online", "chain": "pointp", "city": "Paris", "website": "https://www.pointp.fr"},
     # Bricozor
     {"name": "Bricozor Online", "chain": "bricozor", "city": "Paris", "website": "https://www.bricozor.com"},
+    # Dispano
+    {"name": "Dispano Online", "chain": "dispano", "city": "Paris", "website": "https://www.dispano.fr"},
 ]
 
 
