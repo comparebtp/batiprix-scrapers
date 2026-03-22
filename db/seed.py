@@ -54,6 +54,9 @@ STORES = [
 
     # Chausson Matériaux
     {"name": "Chausson Matériaux Nice", "chain": "chausson", "city": "Nice", "website": "https://www.chausson.fr"},
+
+    # Legallais
+    {"name": "Legallais Online", "chain": "legallais", "city": "Caen", "website": "https://www.legallais.com"},
 ]
 
 
