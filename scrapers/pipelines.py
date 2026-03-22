@@ -154,6 +154,12 @@ class DatabasePipeline:
         ).first()
 
         if listing:
+            # Skip if already scraped recently (incremental mode)
+            if listing.last_scraped_at:
+                from datetime import timedelta
+                if datetime.utcnow() - listing.last_scraped_at < timedelta(hours=12):
+                    return item  # Already fresh, skip DB write
+
             # Update existing
             old_price = float(listing.current_price) if listing.current_price else None
             listing.store_product_name = item['product_name']

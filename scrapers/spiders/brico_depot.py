@@ -20,11 +20,13 @@ class BricoDepotSpider(BaseBTPSpider):
     STORE_ID = None
     STORE_PATH = None
 
-    def __init__(self, store_id=None, store_path=None, *args, **kwargs):
+    def __init__(self, store_id=None, store_path=None, shard=None, total_shards=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         import os
         self.STORE_ID = store_id or os.environ.get('BD_STORE_ID', '1944')
         self.STORE_PATH = store_path or os.environ.get('BD_STORE_PATH', 'nice-lingostiere')
+        self.shard = int(shard) if shard is not None else None
+        self.total_shards = int(total_shards) if total_shards is not None else None
         # Update cookie header with selected store
         self.custom_settings = dict(self.custom_settings)
         headers = dict(self.custom_settings.get('DEFAULT_REQUEST_HEADERS', {}))
@@ -80,7 +82,9 @@ class BricoDepotSpider(BaseBTPSpider):
     }
 
     def start_requests(self):
-        # Fetch all 5 product sitemaps
+        # Fetch all 5 product sitemaps; collect URLs for sharding
+        self._all_product_urls = []
+        self._sitemaps_remaining = 5
         for i in ['', '2', '3', '4', '5']:
             url = f'https://www.bricodepot.fr/productSitemap{i}.xml'
             yield scrapy.Request(
@@ -91,7 +95,7 @@ class BricoDepotSpider(BaseBTPSpider):
             )
 
     def parse_sitemap(self, response):
-        """Extract product URLs from sitemap XML."""
+        """Extract product URLs from sitemap XML, then shard if needed."""
         body = response.text
 
         # Validate we got actual XML, not a blocked/interstitial page
@@ -101,6 +105,9 @@ class BricoDepotSpider(BaseBTPSpider):
                 f"(status={response.status}, length={len(body)}, "
                 f"first 200 chars: {body[:200]})"
             )
+            self._sitemaps_remaining -= 1
+            if self._sitemaps_remaining == 0:
+                yield from self._dispatch_product_urls()
             return
 
         # Extract all product URLs from sitemap
@@ -120,28 +127,46 @@ class BricoDepotSpider(BaseBTPSpider):
                 f"No /catalogue/ URLs in sitemap. Total <loc> tags: {len(all_locs)}. "
                 f"Sample URLs: {all_locs[:3]}"
             )
-            return
+        else:
+            for url in urls:
+                # Extract product slug from URL for keyword filtering
+                slug = url.split('/catalogue/')[-1].lower() if '/catalogue/' in url else ''
 
-        filtered = 0
-        for url in urls:
-            # Extract product slug from URL for keyword filtering
-            slug = url.split('/catalogue/')[-1].lower() if '/catalogue/' in url else ''
+                # Check if URL matches BTP keywords
+                if any(kw in slug for kw in self.BTP_KEYWORDS):
+                    # Extract category from URL path
+                    parts = slug.strip('/').split('/')
+                    cat_name = parts[0].replace('-', ' ').title() if parts else 'Divers'
+                    self._all_product_urls.append((url, cat_name))
 
-            # Check if URL matches BTP keywords
-            if any(kw in slug for kw in self.BTP_KEYWORDS):
-                filtered += 1
-                # Extract category from URL path
-                parts = slug.strip('/').split('/')
-                cat_name = parts[0].replace('-', ' ').title() if parts else 'Divers'
+            self.logger.info(
+                f"After filtering: {len(self._all_product_urls)} BTP-relevant products so far"
+            )
 
-                yield scrapy.Request(
-                    url,
-                    callback=self.parse_product,
-                    meta={'category_path': [cat_name]},
-                    priority=1,
-                )
+        self._sitemaps_remaining -= 1
+        if self._sitemaps_remaining == 0:
+            yield from self._dispatch_product_urls()
 
-        self.logger.info(f"Filtered {filtered}/{len(urls)} BTP-relevant products")
+    def _dispatch_product_urls(self):
+        """Apply sharding and yield product requests."""
+        product_urls = self._all_product_urls
+        self.logger.info(f"Total BTP-relevant product URLs: {len(product_urls)}")
+
+        # If sharding, only take our slice
+        if self.shard is not None and self.total_shards is not None:
+            chunk_size = max(1, len(product_urls) // self.total_shards)
+            start = self.shard * chunk_size
+            end = len(product_urls) if self.shard == self.total_shards - 1 else start + chunk_size
+            product_urls = product_urls[start:end]
+            self.logger.info(f"Shard {self.shard}/{self.total_shards}: {len(product_urls)} URLs")
+
+        for url, cat_name in product_urls:
+            yield scrapy.Request(
+                url,
+                callback=self.parse_product,
+                meta={'category_path': [cat_name]},
+                priority=1,
+            )
 
     def parse_product(self, response):
         """Extract product data from product page HTML."""

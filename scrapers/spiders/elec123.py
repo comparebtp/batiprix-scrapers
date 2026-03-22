@@ -16,6 +16,11 @@ class Elec123Spider(BaseBTPSpider):
     store_chain = 'elec123'
     allowed_domains = ['123elec.com']
 
+    def __init__(self, shard=None, total_shards=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shard = int(shard) if shard is not None else None
+        self.total_shards = int(total_shards) if total_shards is not None else None
+
     custom_settings = {
         'DOWNLOAD_DELAY': 1.5,
         'CONCURRENT_REQUESTS_PER_DOMAIN': 3,
@@ -87,13 +92,20 @@ class Elec123Spider(BaseBTPSpider):
         # However, some product URLs have subdirectories too.
         # We send all .html URLs to parse_product; the parser will skip non-products
         # (no JSON-LD Product) gracefully.
-        product_count = 0
-        for url in urls:
-            if url.endswith('.html'):
-                product_count += 1
-                yield scrapy.Request(url, callback=self.parse_product)
+        product_urls = [url for url in urls if url.endswith('.html')]
 
-        self.logger.info(f"Sent {product_count} URLs to product parser")
+        # If sharding, only take our slice
+        if self.shard is not None and self.total_shards is not None:
+            chunk_size = max(1, len(product_urls) // self.total_shards)
+            start = self.shard * chunk_size
+            end = len(product_urls) if self.shard == self.total_shards - 1 else start + chunk_size
+            product_urls = product_urls[start:end]
+            self.logger.info(f"Shard {self.shard}/{self.total_shards}: {len(product_urls)} URLs")
+
+        for url in product_urls:
+            yield scrapy.Request(url, callback=self.parse_product)
+
+        self.logger.info(f"Sent {len(product_urls)} URLs to product parser")
 
     def _start_category_crawl(self):
         """Start crawling from category entry points."""

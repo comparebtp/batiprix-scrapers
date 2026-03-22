@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  brico-depot-nice:
+  brico-depot-nice-0:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 200
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       BD_STORE_ID: '1944'
@@ -20,12 +20,29 @@ jobs:
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
       - run: python -c "from db.models import init_db; init_db()"
       - run: python db/seed.py || true
-      - name: Scrape Brico Dépôt Nice
-        run: python -m scrapy crawl brico_depot -a store_id=1944 -a store_path=nice-lingostiere -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
+      - name: Scrape Brico Dépôt Nice shard 0/2
+        run: python -m scrapy crawl brico_depot -a store_id=1944 -a store_path=nice-lingostiere -a shard=0 -a total_shards=2 -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
 
-  brico-depot-toulon:
+  brico-depot-nice-1:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BD_STORE_ID: '1944'
+      BD_STORE_PATH: 'nice-lingostiere'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Brico Dépôt Nice shard 1/2
+        run: python -m scrapy crawl brico_depot -a store_id=1944 -a store_path=nice-lingostiere -a shard=1 -a total_shards=2 -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
+
+  brico-depot-toulon-0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       BD_STORE_ID: '1773'
@@ -37,8 +54,25 @@ jobs:
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
       - run: python -c "from db.models import init_db; init_db()"
       - run: python db/seed.py || true
-      - name: Scrape Brico Dépôt Toulon
-        run: python -m scrapy crawl brico_depot -a store_id=1773 -a store_path=toulon -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
+      - name: Scrape Brico Dépôt Toulon shard 0/2
+        run: python -m scrapy crawl brico_depot -a store_id=1773 -a store_path=toulon -a shard=0 -a total_shards=2 -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
+
+  brico-depot-toulon-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BD_STORE_ID: '1773'
+      BD_STORE_PATH: 'toulon'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Brico Dépôt Toulon shard 1/2
+        run: python -m scrapy crawl brico_depot -a store_id=1773 -a store_path=toulon -a shard=1 -a total_shards=2 -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=0.5 -s CONCURRENT_REQUESTS_PER_DOMAIN=5 2>&1 | tail -30
 
   tollens:
     runs-on: ubuntu-latest
@@ -160,7 +194,7 @@ jobs:
       - name: Scrape
         run: python -m scrapy crawl wurth -s LOG_LEVEL=INFO -s DOWNLOAD_DELAY=2.5 2>&1 | tail -20
 
-  elec123:
+  elec123-0:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -172,8 +206,23 @@ jobs:
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
       - run: python -c "from db.models import init_db; init_db()"
       - run: python db/seed.py || true
-      - name: Scrape 123elec
-        run: python -m scrapy crawl elec123 -s LOG_LEVEL=INFO 2>&1 | tail -20
+      - name: Scrape 123elec shard 0/2
+        run: python -m scrapy crawl elec123 -a shard=0 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  elec123-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape 123elec shard 1/2
+        run: python -m scrapy crawl elec123 -a shard=1 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
 
   maxoutil:
     runs-on: ubuntu-latest
@@ -209,7 +258,7 @@ jobs:
   post-process:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [brico-depot-nice, brico-depot-toulon, tollens, sobrico-0, sobrico-1, matelec-0, matelec-1, matelec-2, matelec-3, wurth, distriartisan, elec123, maxoutil]
+    needs: [brico-depot-nice-0, brico-depot-nice-1, brico-depot-toulon-0, brico-depot-toulon-1, tollens, sobrico-0, sobrico-1, matelec-0, matelec-1, matelec-2, matelec-3, wurth, distriartisan, elec123-0, elec123-1, maxoutil]
     if: always()
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
