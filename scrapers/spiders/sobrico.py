@@ -20,6 +20,11 @@ class SobricoSpider(BaseBTPSpider):
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     }
 
+    def __init__(self, shard=None, total_shards=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shard = int(shard) if shard is not None else None
+        self.total_shards = int(total_shards) if total_shards is not None else None
+
     # BTP-relevant category entry points
     START_CATEGORIES = [
         'https://www.sobrico.com/outillage-electroportatif_C70933.html',
@@ -66,12 +71,21 @@ class SobricoSpider(BaseBTPSpider):
 
         # Product URLs
         urls = response.xpath('//url/loc/text()').getall()
-        self.logger.info(f"Sitemap: {len(urls)} URLs")
+        product_urls = [u for u in urls if '/p/' in u]
+        self.logger.info(f"Sitemap: {len(product_urls)} product URLs")
+
+        # If sharding, only take our slice
+        if self.shard is not None and self.total_shards is not None:
+            chunk_size = max(1, len(product_urls) // self.total_shards)
+            start = self.shard * chunk_size
+            end = len(product_urls) if self.shard == self.total_shards - 1 else start + chunk_size
+            product_urls = product_urls[start:end]
+            self.logger.info(f"Shard {self.shard}/{self.total_shards}: {len(product_urls)} URLs")
+
         product_count = 0
-        for url in urls:
-            if '/p/' in url:
-                product_count += 1
-                yield scrapy.Request(url, callback=self.parse_product)
+        for url in product_urls:
+            product_count += 1
+            yield scrapy.Request(url, callback=self.parse_product)
         self.logger.info(f"Found {product_count} product URLs")
 
         if product_count == 0:

@@ -23,6 +23,11 @@ class MaterielElectriqueSpider(BaseBTPSpider):
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     }
 
+    def __init__(self, shard=None, total_shards=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shard = int(shard) if shard is not None else None
+        self.total_shards = int(total_shards) if total_shards is not None else None
+
     def start_requests(self):
         yield scrapy.Request(
             'https://www.materielelectrique.com/sitemap.xml',
@@ -31,13 +36,20 @@ class MaterielElectriqueSpider(BaseBTPSpider):
 
     def parse_sitemap_index(self, response):
         response.selector.remove_namespaces()
-        # Sitemap index contains links to sub-sitemaps
         sitemaps = response.xpath('//sitemap/loc/text()').getall()
-        self.logger.info(f"Found {len(sitemaps)} sub-sitemaps")
-        for url in sitemaps:
-            # Only product sitemaps
-            if 'product' in url.lower() or 'catalog' in url.lower():
-                yield scrapy.Request(url, callback=self.parse_sitemap)
+        product_sitemaps = [u for u in sitemaps if 'product' in u.lower() or 'catalog' in u.lower()]
+        self.logger.info(f"Found {len(product_sitemaps)} product sub-sitemaps")
+
+        # If sharding, only take our slice of sitemaps
+        if self.shard is not None and self.total_shards is not None:
+            chunk_size = max(1, len(product_sitemaps) // self.total_shards)
+            start = self.shard * chunk_size
+            end = len(product_sitemaps) if self.shard == self.total_shards - 1 else start + chunk_size
+            product_sitemaps = product_sitemaps[start:end]
+            self.logger.info(f"Shard {self.shard}/{self.total_shards}: processing {len(product_sitemaps)} sitemaps")
+
+        for url in product_sitemaps:
+            yield scrapy.Request(url, callback=self.parse_sitemap)
 
     def parse_sitemap(self, response):
         # Handle gzipped sitemaps

@@ -55,7 +55,37 @@ jobs:
       - name: Scrape
         run: python -m scrapy crawl tollens -s LOG_LEVEL=INFO 2>&1 | tail -20
 
-  sobrico:
+  sobrico-0:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Sobrico shard 0/2
+        run: python -m scrapy crawl sobrico -a shard=0 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  sobrico-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape Sobrico shard 1/2
+        run: python -m scrapy crawl sobrico -a shard=1 -a total_shards=2 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  matelec-0:
     runs-on: ubuntu-latest
     timeout-minutes: 300
     env:
@@ -67,12 +97,12 @@ jobs:
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
       - run: python -c "from db.models import init_db; init_db()"
       - run: python db/seed.py || true
-      - name: Scrape
-        run: python -m scrapy crawl sobrico -s LOG_LEVEL=INFO 2>&1 | tail -20
+      - name: Scrape MaterielElectrique shard 0/4
+        run: python -m scrapy crawl materiel_electrique -a shard=0 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
 
-  materiel-electrique:
+  matelec-1:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 300
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
@@ -82,8 +112,38 @@ jobs:
       - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
       - run: python -c "from db.models import init_db; init_db()"
       - run: python db/seed.py || true
-      - name: Scrape
-        run: python -m scrapy crawl materiel_electrique -s LOG_LEVEL=INFO 2>&1 | tail -20
+      - name: Scrape MaterielElectrique shard 1/4
+        run: python -m scrapy crawl materiel_electrique -a shard=1 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  matelec-2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape MaterielElectrique shard 2/4
+        run: python -m scrapy crawl materiel_electrique -a shard=2 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
+
+  matelec-3:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: 'pip' }
+      - run: pip install scrapy rapidfuzz unidecode sqlalchemy psycopg2-binary python-dotenv requests
+      - run: python -c "from db.models import init_db; init_db()"
+      - run: python db/seed.py || true
+      - name: Scrape MaterielElectrique shard 3/4
+        run: python -m scrapy crawl materiel_electrique -a shard=3 -a total_shards=4 -s LOG_LEVEL=INFO 2>&1 | tail -20
 
   wurth:
     runs-on: ubuntu-latest
@@ -149,7 +209,7 @@ jobs:
   post-process:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [brico-depot-nice, brico-depot-toulon, tollens, sobrico, materiel-electrique, wurth, distriartisan, elec123, maxoutil]
+    needs: [brico-depot-nice, brico-depot-toulon, tollens, sobrico-0, sobrico-1, matelec-0, matelec-1, matelec-2, matelec-3, wurth, distriartisan, elec123, maxoutil]
     if: always()
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
