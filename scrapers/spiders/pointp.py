@@ -24,7 +24,7 @@ class PointPSpider(BaseBTPSpider):
     allowed_domains = ['pointp.fr', 'www.pointp.fr']
 
     SITEMAP_URLS = [
-        f'https://www.pointp.fr/sitemap/articles_urls_{i}.xml'
+        f'https://www.pointp.fr/articles_urls_{i}.xml'
         for i in range(1, 3)
     ]
 

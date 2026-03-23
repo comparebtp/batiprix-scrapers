@@ -24,7 +24,7 @@ class CedeoSpider(BaseBTPSpider):
     allowed_domains = ['cedeo.fr', 'www.cedeo.fr']
 
     SITEMAP_URLS = [
-        f'https://www.cedeo.fr/sitemap/articles_urls_{i}.xml'
+        f'https://www.cedeo.fr/articles_urls_{i}.xml'
         for i in range(1, 6)
     ]
 
